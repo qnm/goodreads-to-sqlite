@@ -96,3 +96,33 @@ def books(db_path, auth, username, scrape):
 
     utils.fetch_user_and_shelves(user_id, token, db=db)
     utils.fetch_books(db, user_id, token, scrape=scrape)
+
+
+@cli.command()
+@click.argument(
+    "db_path",
+    type=click.Path(file_okay=True, dir_okay=False, allow_dash=False),
+    required=True,
+)
+@click.argument(
+    "csv_path",
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, allow_dash=False),
+    required=True,
+)
+@click.option(
+    "--user-id",
+    type=str,
+    help="User ID to associate with imported books. If not provided, will use a default.",
+)
+def import_csv(db_path, csv_path, user_id):
+    """Import books from a Goodreads CSV export file"""
+    db = sqlite_utils.Database(db_path)
+
+    if not user_id:
+        user_id = "csv_import"
+        click.secho(
+            f"No user ID provided, using default: {user_id}", fg="yellow"
+        )
+
+    click.secho(f"Importing from {csv_path} to {db_path}", fg="green")
+    utils.import_from_csv(db, csv_path, user_id)

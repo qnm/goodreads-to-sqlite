@@ -14,7 +14,32 @@ and shelves of other people.
 
 Add the `-U` flag to update. Change notes can be found in the ``CHANGELOG`` file, next to this README.
 
-## Authentication
+## Importing from CSV Export
+
+The easiest way to use this tool is to import from a Goodreads CSV export. To get your CSV export:
+
+1. Go to https://www.goodreads.com/review/import
+2. Click "Export Library"
+3. Wait for the email with your export file
+4. Download the `goodreads_library_export.csv` file
+
+Then import it:
+
+    $ goodreads-to-sqlite import-csv goodreads.db goodreads_library_export.csv
+
+You can optionally specify a user ID to associate with the imported books:
+
+    $ goodreads-to-sqlite import-csv goodreads.db goodreads_library_export.csv --user-id your_user_id
+
+This will create the same database structure as the API import, including:
+- Books with titles, authors, ISBNs, publishers, publication dates, and series information
+- Authors (including additional authors from the CSV)
+- Reviews with ratings and dates
+- Shelves (read, to-read, currently-reading, and any custom shelves)
+
+## Authentication (for API import - deprecated)
+
+**Note:** The Goodreads API has been shut down, so the API-based import methods below no longer work. Use the CSV import method above instead.
 
 Create a Goodreads developer token: https://www.goodreads.com/api/keys
 
@@ -25,7 +50,7 @@ Run this command and paste in your token and your profile URL:
 This will create a file called `auth.json` in your current directory containing the required value. To save the file at
 a different path or filename, use the `--auth=myauth.json` option.
 
-## Retrieving books
+## Retrieving books (API - deprecated)
 
 The `books` command retrieves all of the books and reviews/ratings belonging to you:
 
@@ -54,12 +79,9 @@ The `auth.json` file is used by default for authentication. You can point to a d
 
 ## Limitations
 
-- The order of books in shelves is not exposed in the API, so we cannot determine the order of the to-read list.
-- Goodreads also offers a CSV export, which is currently not supported as an input format.
-- Since the Goodreads API is a bit slow, and we are restricted to one request per second, for larger libraries the
-  import can take a couple of minutes.
-- The script currently re-syncs the entire library instead of just looking at newly changed data, to make sure we don't
-  lose information after aborted syncs.
+- The Goodreads API has been shut down, so API-based imports no longer work. Use the CSV import instead.
+- The order of books in shelves is not exposed in the CSV export, so we cannot determine the order of the to-read list.
+- Book descriptions and cover image URLs are not included in the CSV export, so these fields will be null when importing from CSV.
 
 ## Thanks
 

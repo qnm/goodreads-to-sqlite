@@ -1,3 +1,4 @@
+import csv
 import datetime as dt
 import sys
 import xml.etree.ElementTree as ET
@@ -297,3 +298,186 @@ def maybe_date(value):
     if value:
         return dateutil.parser.parse(value)
     return None
+
+
+def import_from_csv(db, csv_path, user_id):
+    """Import books from a Goodreads CSV export file."""
+    books = {}
+    authors = {}
+    reviews = {}
+    shelves_data = {}
+
+    # Create or get user
+    user = {
+        "id": user_id,
+        "name": user_id,
+        "username": user_id,
+    }
+    save_user(db, user)
+
+    with open(csv_path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        total_rows = sum(1 for _ in open(csv_path, "r", encoding="utf-8")) - 1
+
+        f.seek(0)
+        next(reader)  # Skip header
+
+        for row in tqdm(reader, total=total_rows, desc="Processing CSV"):
+            book_id = row["Book Id"]
+
+            # Parse authors
+            book_authors = []
+            primary_author_name = row["Author"]
+            if primary_author_name:
+                author_id = f"author_{primary_author_name.replace(' ', '_')}"
+                authors[author_id] = {"id": author_id, "name": primary_author_name}
+                book_authors.append({"id": author_id, "name": primary_author_name})
+
+            # Parse additional authors
+            additional_authors = row.get("Additional Authors", "")
+            if additional_authors:
+                for author_name in additional_authors.split(","):
+                    author_name = author_name.strip()
+                    if author_name:
+                        author_id = f"author_{author_name.replace(' ', '_')}"
+                        authors[author_id] = {"id": author_id, "name": author_name}
+                        book_authors.append({"id": author_id, "name": author_name})
+
+            # Clean ISBN fields (remove ="..." format)
+            isbn = clean_isbn(row.get("ISBN", ""))
+            isbn13 = clean_isbn(row.get("ISBN13", ""))
+
+            # Parse title and series
+            title = row["Title"]
+            series = None
+            series_position = None
+
+            # Try to extract series from title (format: "Title (Series #1)")
+            if "(" in title and ")" in title:
+                title_parts = title.rsplit("(", 1)
+                if len(title_parts) == 2:
+                    potential_series = title_parts[1].rstrip(")")
+                    if "#" in potential_series:
+                        series_parts = potential_series.split("#")
+                        series = series_parts[0].strip(", ")
+                        series_position = series_parts[1].strip(", ")
+                        title = title_parts[0].strip()
+
+            # Parse publication date
+            publication_date = None
+            original_pub_year = row.get("Original Publication Year", "")
+            if original_pub_year and original_pub_year.strip():
+                try:
+                    year = int(float(original_pub_year))
+                    publication_date = dt.date(year, 1, 1)
+                except (ValueError, TypeError):
+                    pass
+
+            # Create book record
+            books[book_id] = {
+                "id": book_id,
+                "isbn": isbn or None,
+                "isbn13": isbn13 or None,
+                "title": title,
+                "series": series,
+                "series_position": series_position,
+                "pages": row.get("Number of Pages") or None,
+                "publisher": row.get("Publisher") or None,
+                "publication_date": publication_date,
+                "description": None,
+                "image_url": None,
+                "authors": book_authors,
+            }
+
+            # Parse rating
+            rating = row.get("My Rating", "")
+            rating = int(rating) if rating and rating != "0" else None
+
+            # Parse dates
+            date_read = parse_csv_date(row.get("Date Read", ""))
+            date_added = parse_csv_date(row.get("Date Added", ""))
+
+            # Parse shelves
+            review_shelves = []
+            exclusive_shelf = row.get("Exclusive Shelf", "")
+            if exclusive_shelf:
+                shelf_id = f"shelf_{user_id}_{exclusive_shelf}"
+                shelves_data[shelf_id] = {
+                    "id": shelf_id,
+                    "name": exclusive_shelf,
+                    "user_id": user_id,
+                }
+                review_shelves.append({
+                    "id": shelf_id,
+                    "name": exclusive_shelf,
+                    "user_id": user_id,
+                })
+
+            # Parse additional bookshelves
+            bookshelves = row.get("Bookshelves", "")
+            if bookshelves:
+                for shelf_name in bookshelves.split(","):
+                    shelf_name = shelf_name.strip()
+                    if shelf_name:
+                        shelf_id = f"shelf_{user_id}_{shelf_name}"
+                        shelves_data[shelf_id] = {
+                            "id": shelf_id,
+                            "name": shelf_name,
+                            "user_id": user_id,
+                        }
+                        review_shelves.append({
+                            "id": shelf_id,
+                            "name": shelf_name,
+                            "user_id": user_id,
+                        })
+
+            # Create review record
+            review_id = f"review_{book_id}_{user_id}"
+            reviews[review_id] = {
+                "id": review_id,
+                "book_id": book_id,
+                "user_id": user_id,
+                "rating": rating,
+                "text": row.get("My Review", "").strip(),
+                "shelves": review_shelves,
+            }
+
+            if date_read:
+                reviews[review_id]["read_at"] = date_read
+            if date_added:
+                reviews[review_id]["date_added"] = date_added
+
+    # Save all shelves first
+    for shelf in shelves_data.values():
+        save_shelf(db, shelf, user_id)
+
+    # Save data to database
+    save_authors(db, list(authors.values()))
+    save_books(db, list(books.values()))
+    save_reviews(db, list(reviews.values()))
+
+    click.secho(
+        f"Imported {len(books)} books, {len(authors)} authors, and {len(reviews)} reviews",
+        fg="green",
+    )
+
+
+def clean_isbn(isbn_value):
+    """Clean ISBN value from CSV format (removes ="..." wrapping)."""
+    if not isbn_value:
+        return ""
+    # Remove ="..." format
+    isbn_value = isbn_value.strip()
+    if isbn_value.startswith('="') and isbn_value.endswith('"'):
+        isbn_value = isbn_value[2:-1]
+    return isbn_value
+
+
+def parse_csv_date(date_str):
+    """Parse date from CSV format (YYYY/MM/DD)."""
+    if not date_str or not date_str.strip():
+        return None
+    try:
+        return dateutil.parser.parse(date_str)
+    except (ValueError, TypeError):
+        return None
